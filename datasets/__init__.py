@@ -16,6 +16,7 @@ from .mixed import build as build_mixed
 from .phrasecut import build as build_phrasecut
 from .refexp import build as build_refexp
 from .vg import build as build_vg
+from .vqa_v2 import build as build_vqa_v2
 
 
 def get_coco_api_from_dataset(dataset):
@@ -53,4 +54,6 @@ def build_dataset(dataset_file: str, image_set: str, args):
         return build_vg(image_set, args)
     if dataset_file == "phrasecut":
         return build_phrasecut(image_set, args)
+    if dataset_file == "vqa_v2":
+        return build_vqa_v2(image_set, args)
     raise ValueError(f"dataset {dataset_file} not supported")
