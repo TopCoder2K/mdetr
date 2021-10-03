@@ -1,0 +1,6 @@
+{
+  "combine_datasets": ["vqa2"],
+  "combine_datasets_val": ["vqa2"],
+  "coco_img_path": "/path/to/coco_images",
+  "vqa2_ann_path": "/path/to/processed_annotations_for_finetuning"
+}

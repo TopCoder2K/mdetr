@@ -306,7 +306,7 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    torch.set_deterministic(True)
+    torch.set_deterministic(False)
 
     # Build the model
     model, criterion, contrastive_criterion, qa_criterion, weight_dict = build_model(args)
@@ -611,7 +611,10 @@ def main(args):
 
         if epoch % args.eval_skip == 0:
             if args.do_qa:
-                metric = test_stats["gqa_accuracy_answer_total_unscaled"]
+                if "gqa" in args.combine_datasets:
+                    metric = test_stats["gqa_accuracy_answer_total_unscaled"]
+                else:
+                    metric = test_stats["vqa2_accuracy_answer_total_unscaled"]  # TODO: в какой момент приписывается название датасета?)
             else:
                 metric = np.mean([v[1] for k, v in test_stats.items() if "coco_eval_bbox" in k])
 

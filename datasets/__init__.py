@@ -54,6 +54,6 @@ def build_dataset(dataset_file: str, image_set: str, args):
         return build_vg(image_set, args)
     if dataset_file == "phrasecut":
         return build_phrasecut(image_set, args)
-    if dataset_file == "vqa_v2":
+    if dataset_file == "vqa2":
         return build_vqa_v2(image_set, args)
     raise ValueError(f"dataset {dataset_file} not supported")

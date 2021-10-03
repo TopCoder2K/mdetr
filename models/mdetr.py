@@ -51,7 +51,7 @@ class MDETR(nn.Module):
             contrastive_hdim: dimension used for projecting the embeddings before computing contrastive loss
             contrastive_loss: If true, perform image-text contrastive learning
             contrastive_align_loss: If true, perform box - token contrastive learning
-            qa_dataset: If not None, train a QA head for the target dataset (CLEVR or GQA)
+            qa_dataset: If not None, train a QA head for the target dataset (CLEVR or GQA or VQA2)
             split_qa_heads: If true, use several head for each question type
             predict_final: If true, will predict if a given box is in the actual referred set.
                            Useful for CLEVR-Ref+ only currently.
@@ -64,6 +64,7 @@ class MDETR(nn.Module):
         self.isfinal_embed = nn.Linear(hidden_dim, 1) if predict_final else None
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
+        # TODO: check heads number
         if qa_dataset is not None:
             nb_heads = 6 if qa_dataset == "gqa" else 4
             self.qa_embed = nn.Embedding(nb_heads if split_qa_heads else 1, hidden_dim)
@@ -99,12 +100,21 @@ class MDETR(nn.Module):
                     self.answer_binary_head = nn.Linear(hidden_dim, 1)
                     self.answer_attr_head = nn.Linear(hidden_dim, 15)
                     self.answer_reg_head = MLP(hidden_dim, hidden_dim, 20, 3)
+                elif qa_dataset == "vqa2":
+                    # All values were taken from the appropriate json file.
+                    self.answer_type_head = nn.Linear(hidden_dim, 3)
+                    self.answer_yesno_head = nn.Linear(hidden_dim, 7)
+                    self.answer_number_head = nn.Linear(hidden_dim, 218)
+                    self.answer_other_head = nn.Linear(hidden_dim, 1814)
                 else:
                     assert False, f"Invalid qa dataset {qa_dataset}"
             else:
                 # TODO: make this more general
-                assert qa_dataset == "gqa", "Clevr QA is not supported with unified head"
-                self.answer_head = nn.Linear(hidden_dim, 1853)
+                assert qa_dataset == "gqa" or qa_dataset == "vqa2", "Clevr QA is not supported with unified head"
+                if qa_dataset == "gqa":
+                    self.answer_head = nn.Linear(hidden_dim, 1853)
+                elif qa_dataset == "vqa2":
+                    self.answer_head = nn.Linear(hidden_dim, 1874)
 
     def forward(self, samples: NestedTensor, captions, encode_and_save=True, memory_cache=None):
         """The forward expects a NestedTensor, which consists of:
@@ -179,6 +189,13 @@ class MDETR(nn.Module):
                         out["pred_answer_binary"] = self.answer_binary_head(answer_embeds[:, 1]).squeeze(-1)
                         out["pred_answer_reg"] = self.answer_reg_head(answer_embeds[:, 2])
                         out["pred_answer_attr"] = self.answer_attr_head(answer_embeds[:, 3])
+                    elif self.qa_dataset == "vqa2":
+                        answer_embeds = hs[0, :, -4:]
+                        hs = hs[:, :, :-4]
+                        out["pred_answer_type"] = self.answer_type_head(answer_embeds[:, 0])
+                        out["pred_answer_yes/no"] = self.answer_yesno_head(answer_embeds[:, 1])
+                        out["pred_answer_number"] = self.answer_number_head(answer_embeds[:, 2])
+                        out["pred_answer_other"] = self.answer_other_head(answer_embeds[:, 3])
                     else:
                         assert False, f"Invalid qa dataset {self.qa_dataset}"
 
@@ -352,6 +369,77 @@ class QACriterionGQA(nn.Module):
         loss["accuracy_answer_total"] = (
             type_acc
             * (is_obj * obj_acc + is_rel * rel_acc + is_attr * attr_acc + is_global * global_acc + is_cat * cat_acc)
+        ).sum() / type_acc.numel()
+
+        return loss
+
+
+class QACriterionVQA(nn.Module):
+    def __init__(self, split_qa_heads):
+        super().__init__()
+        self.split_qa_heads = split_qa_heads
+
+    def forward(self, output, answers):
+        loss = {}
+        if not self.split_qa_heads:
+            loss["loss_answer_total"] = F.cross_entropy(output["pred_answer"], answers["answer"], reduction="mean")
+            attr_total = (output["pred_answer"].argmax(-1)) == answers["answer"]
+            loss["accuracy_answer_total"] = attr_total.float().mean()
+            return loss
+
+        device = output["pred_answer_type"].device
+        loss["loss_answer_type"] = F.cross_entropy(output["pred_answer_type"], answers["answer_type"])
+
+        type_acc = output["pred_answer_type"].argmax(-1) == answers["answer_type"]
+        loss["accuracy_answer_type"] = type_acc.sum() / answers["answer_type"].numel()
+
+        # The order matters, it is consistent with VQAv2QquestionAnswering.type2id
+        is_yesno = answers["answer_type"] == 0
+        is_number = answers["answer_type"] == 1
+        is_other = answers["answer_type"] == 2
+
+        ## yes/no type
+        yesno_norm = is_yesno.sum() if is_yesno.any() else 1.0
+        loss["loss_answer_yes/no"] = (
+            F.cross_entropy(output["pred_answer_yes/no"], answers["answer_yes/no"], reduction="none")
+            .masked_fill(~is_yesno, 0)
+            .sum()
+            / yesno_norm
+        )
+        yesno_acc = (output["pred_answer_yes/no"].argmax(-1)) == answers["answer_yes/no"]
+        loss["accuracy_answer_yes/no"] = (
+            yesno_acc[is_yesno].sum() / is_yesno.sum() if is_yesno.any() else torch.as_tensor(1.0, device=device)
+        )
+
+        ## number type
+        number_norm = is_number.sum() if is_number.any() else 1.0
+        loss["loss_answer_number"] = (
+            F.cross_entropy(output["pred_answer_number"], answers["answer_number"], reduction="none")
+            .masked_fill(~is_number, 0)
+            .sum()
+            / number_norm
+        )
+        number_acc = (output["pred_answer_number"].argmax(-1)) == answers["answer_number"]
+        loss["accuracy_answer_number"] = (
+            number_acc[is_number].sum() / is_number.sum() if is_number.any() else torch.as_tensor(1.0, device=device)
+        )
+
+        ## other type
+        other_norm = is_other.sum() if is_other.any() else 1.0
+        loss["loss_answer_other"] = (
+            F.cross_entropy(output["pred_answer_other"], answers["answer_other"], reduction="none")
+            .masked_fill(~is_other, 0)
+            .sum()
+            / other_norm
+        )
+        other_acc = (output["pred_answer_other"].argmax(-1)) == answers["answer_other"]
+        loss["accuracy_answer_other"] = (
+            other_acc[is_other].sum() / is_other.sum() if is_other.any() else torch.as_tensor(1.0, device=device)
+        )
+
+        loss["accuracy_answer_total"] = (
+            type_acc
+            * (is_yesno * yesno_acc + is_number * number_acc + is_other * other_acc)
         ).sum() / type_acc.numel()
 
         return loss
@@ -725,8 +813,12 @@ def build(args):
             "clevr_question" in args.combine_datasets
             or "clevr" in args.combine_datasets
             or "gqa" in args.combine_datasets
-        ), "Question answering require either gqa or clevr dataset"
+            or "vqa2" in args.combine_datasets
+        ), "Question answering require vqa2 or gqa or clevr dataset"
+        # Datasets are not combined
         qa_dataset = "gqa" if "gqa" in args.combine_datasets else "clevr"
+        if "vqa2" in args.combine_datasets:
+            qa_dataset = "vqa2"
 
     backbone = build_backbone(args)
 
@@ -774,6 +866,10 @@ def build(args):
                 weight_dict["loss_answer_rel"] = 1 * args.qa_loss_coef
                 weight_dict["loss_answer_obj"] = 1 * args.qa_loss_coef
                 weight_dict["loss_answer_global"] = 1 * args.qa_loss_coef
+            elif qa_dataset == "vqa2":
+                weight_dict["loss_answer_yes/no"] = 1 * args.qa_loss_coef
+                weight_dict["loss_answer_number"] = 1 * args.qa_loss_coef
+                weight_dict["loss_answer_other"] = 1 * args.qa_loss_coef
             else:
                 weight_dict["loss_answer_binary"] = 1
                 weight_dict["loss_answer_attr"] = 1
@@ -819,6 +915,8 @@ def build(args):
             qa_criterion = QACriterionGQA(split_qa_heads=args.split_qa_heads)
         elif qa_dataset == "clevr":
             qa_criterion = QACriterionClevr()
+        elif qa_dataset == "vqa2":
+            qa_criterion = QACriterionVQA(split_qa_heads=args.split_qa_heads)
         else:
             assert False, f"Invalid qa dataset {qa_dataset}"
         qa_criterion.to(device)
