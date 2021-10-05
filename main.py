@@ -269,6 +269,7 @@ def get_args_parser():
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument("--eval", action="store_true", help="Only run evaluation")
     parser.add_argument("--num_workers", default=5, type=int)
+    parser.add_argument("--do_qa_with_qa_fine-tuned", action="store_true", help="Have the model been already fine-tuned on other QA dataset?")
 
     # Distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
@@ -445,6 +446,12 @@ def main(args):
         if "model_ema" in checkpoint:
             model_without_ddp.load_state_dict(checkpoint["model_ema"], strict=False)
         else:
+            if args.do_qa_with_qa_fine_tuned:
+                # Delete mismatching weights:
+                del checkpoint["model"]["qa_embed.weight"]
+                del checkpoint["model"]["answer_type_head.weight"]
+                del checkpoint["model"]["answer_type_head.bias"]
+
             model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
 
         if args.ema:
