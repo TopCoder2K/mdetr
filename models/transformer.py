@@ -89,10 +89,14 @@ class Transformer(nn.Module):
         if encode_and_save:
             # flatten NxCxHxW to HWxNxC
             bs, c, h, w = src.shape
+            # src.shape = (h * w, bs, d_model=256)
             src = src.flatten(2).permute(2, 0, 1)
             device = src.device
+            # pos_embed.shape = (h * w, bs, 2*num_pos_feats=256)
             pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
+            # query_embed.shape = (num_queries + nb_heads, bs, 256)
             query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
+            # mask.shape = (b, h * w)
             mask = mask.flatten(1)
 
             if self.CLS is not None:
@@ -117,25 +121,33 @@ class Transformer(nn.Module):
             device = src.device
             if isinstance(text[0], str):
                 # Encode the text
+                # tokenized --- dict, у которого два поля: input_inds, shape = (b, longest + 2); attention_mask, shape = (b, longest + 2) (зануляет padded)
                 tokenized = self.tokenizer.batch_encode_plus(text, padding="longest", return_tensors="pt").to(device)
+                # encoded_text --- BaseModelOutputWithPoolingAndCrossAttentions, у которого в данном случае два поля: last_hidden_state, pooler_output
                 encoded_text = self.text_encoder(**tokenized)
+                # print(f'Text features shape: {encoded_text.last_hidden_state.shape}')
 
                 # Transpose memory because pytorch's attention expects sequence first
                 text_memory = encoded_text.last_hidden_state.transpose(0, 1)
                 # Invert attention mask that we get from huggingface because its the opposite in pytorch transformer
+                # text_attention_mask.shape = (b, seq_length=max_seq_len+2)
                 text_attention_mask = tokenized.attention_mask.ne(1).bool()
 
                 # Resize the encoder hidden states to be of the same d_model as the decoder
+                # text_memory_resized.shape = (seq_length, bs, d_model=256)
                 text_memory_resized = self.resizer(text_memory)
             else:
                 # The text is already encoded, use as is.
                 text_attention_mask, text_memory_resized, tokenized = text
 
             # Concat on the sequence dimension
+            # src.shape = (h * w + seq_length, b, d_model=256)
             src = torch.cat([src, text_memory_resized], dim=0)
             # For mask, sequence dimension is second
+            # mask.shape = (b, h * w + seq_length)
             mask = torch.cat([mask, text_attention_mask], dim=1)
             # Pad the pos_embed with 0 so that the addition will be a no-op for the text tokens
+            # pos_embed.shape = (h * w + seq_length, b, 2*num_pos_feats=256)
             pos_embed = torch.cat([pos_embed, torch.zeros_like(text_memory_resized)], dim=0)
 
             img_memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
@@ -159,12 +171,15 @@ class Transformer(nn.Module):
 
         else:
             if self.pass_pos_and_query:
+                # tgt.shape = (num_queries + nb_heads, b, 256)
                 tgt = torch.zeros_like(query_embed)
             else:
                 src, tgt, query_embed, pos_embed = src + 0.1 * pos_embed, query_embed, None, None
 
             assert img_memory.shape[1] == text_memory.shape[1] == tgt.shape[1]
 
+            # pos_embed.shape = (h*w + seq_length, b, 2*num_pos_feats=256)
+            # query_embed.shape = (num_queries + nb_heads, b, 256)
             hs = self.decoder(
                 tgt,
                 img_memory,
@@ -174,6 +189,8 @@ class Transformer(nn.Module):
                 pos=pos_embed,
                 query_pos=query_embed,
             )
+            # hs.shape = (num_layers=6, num_queries + nb_heads, b, 256)
+            # hs.transpose(1, 2).shape = (num_layers=6, b, num_queries + nb_heads, 256)
             return hs.transpose(1, 2)
 
 

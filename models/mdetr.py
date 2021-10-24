@@ -103,9 +103,9 @@ class MDETR(nn.Module):
                 elif qa_dataset == "vqa2":
                     # All values were taken from the appropriate json file.
                     self.answer_type_head = nn.Linear(hidden_dim, 3)
-                    self.answer_yesno_head = nn.Linear(hidden_dim, 7)
-                    self.answer_number_head = nn.Linear(hidden_dim, 218)
-                    self.answer_other_head = nn.Linear(hidden_dim, 1814)
+                    self.answer_yesno_head = nn.Linear(hidden_dim, 3)
+                    self.answer_number_head = nn.Linear(hidden_dim, 221)
+                    self.answer_other_head = nn.Linear(hidden_dim, 1742)
                 else:
                     assert False, f"Invalid qa dataset {qa_dataset}"
             else:
@@ -114,7 +114,7 @@ class MDETR(nn.Module):
                 if qa_dataset == "gqa":
                     self.answer_head = nn.Linear(hidden_dim, 1853)
                 elif qa_dataset == "vqa2":
-                    self.answer_head = nn.Linear(hidden_dim, 1874)
+                    self.answer_head = nn.Linear(hidden_dim, 1944)
 
     def forward(self, samples: NestedTensor, captions, encode_and_save=True, memory_cache=None):
         """The forward expects a NestedTensor, which consists of:
@@ -136,6 +136,7 @@ class MDETR(nn.Module):
 
         if encode_and_save:
             assert memory_cache is None
+            # print(f'NestedTensor.tensors for backbone: {samples.tensors.shape}')
             features, pos = self.backbone(samples)
             src, mask = features[-1].decompose()
             query_embed = self.query_embed.weight
@@ -161,6 +162,7 @@ class MDETR(nn.Module):
 
         else:
             assert memory_cache is not None
+            # hs.shape = (num_layers=6, b, num_queries + nb_heads, 256)
             hs = self.transformer(
                 mask=memory_cache["mask"],
                 query_embed=memory_cache["query_embed"],
@@ -204,7 +206,10 @@ class MDETR(nn.Module):
                     hs = hs[:, :, :-1]
                     out["pred_answer"] = self.answer_head(answer_embeds)
 
+            # class_embed.weight.shape = (d_model=256, num_classes+1=255+1)
+            # output_class.shape = (num_layers=6, b, num_queries=100, num_classes+1=256)
             outputs_class = self.class_embed(hs)
+            # bbox_embed(hs).shape = (num_layers=6, b, num_queries=100, 4)
             outputs_coord = self.bbox_embed(hs).sigmoid()
             out.update(
                 {
@@ -592,7 +597,7 @@ class SetCriterion(nn.Module):
             torch.matmul(normalized_img_emb, normalized_text_emb.transpose(-1, -2)) / self.temperature
         )  # BS x (num_queries) x (num_tokens)
 
-        # construct a map such that positive_map[k, i,j] = True iff query i is associated to token j in batch item k
+        # construct a map such that positive_map[k, i, j] = True iff query i is associated to token j in batch item k
         # For efficency, the construction happens on CPU, then the whole matrix is transferred to GPU in one go.
         positive_map = torch.zeros(logits.shape, dtype=torch.bool)
         for i, ((idx_src, idx_tgt), tgt) in enumerate(zip(indices, targets)):
@@ -783,7 +788,7 @@ class SetCriterion(nn.Module):
 
 
 class MLP(nn.Module):
-    """ Very simple multi-layer perceptron (also called FFN)"""
+    """ Very simple multi-layer perceptron (also called FFN) """
 
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
         super().__init__()
