@@ -503,6 +503,22 @@ def _get_clones(module, N):
 
 
 def build_transformer(args):
+    if args.inference:
+        # In case of inference no loss is needed
+        return Transformer(
+            d_model=args.hidden_dim,
+            dropout=args.dropout,
+            nhead=args.nheads,
+            dim_feedforward=args.dim_feedforward,
+            num_encoder_layers=args.enc_layers,
+            num_decoder_layers=args.dec_layers,
+            normalize_before=args.pre_norm,
+            return_intermediate_dec=True,
+            pass_pos_and_query=args.pass_pos_and_query,
+            text_encoder_type=args.text_encoder_type,
+            freeze_text_encoder=args.freeze_text_encoder,
+        )
+
     return Transformer(
         d_model=args.hidden_dim,
         dropout=args.dropout,

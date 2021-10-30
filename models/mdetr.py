@@ -64,7 +64,6 @@ class MDETR(nn.Module):
         self.isfinal_embed = nn.Linear(hidden_dim, 1) if predict_final else None
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        # TODO: check heads number
         if qa_dataset is not None:
             nb_heads = 6 if qa_dataset == "gqa" else 4
             self.qa_embed = nn.Embedding(nb_heads if split_qa_heads else 1, hidden_dim)
@@ -175,7 +174,7 @@ class MDETR(nn.Module):
             out = {}
             if self.qa_dataset is not None:
                 if self.split_qa_heads:
-                    if self.qa_dataset == "gqa":
+                    if self.split_qa == "gqa":
                         answer_embeds = hs[0, :, -6:]
                         hs = hs[:, :, :-6]
                         out["pred_answer_type"] = self.answer_type_head(answer_embeds[:, 0])
@@ -928,3 +927,31 @@ def build(args):
     else:
         qa_criterion = None
     return model, criterion, contrastive_criterion, qa_criterion, weight_dict
+
+
+def build_for_fb(args):
+    num_classes = 255
+    # device = torch.device(args.device)
+
+    assert not args.masks or args.mask_model != "none"
+
+    backbone = build_backbone(args)
+    transformer = build_transformer(args)
+    model = MDETR(
+        backbone,
+        transformer,
+        num_classes=num_classes,
+        num_queries=args.num_queries,
+        qa_dataset="vqa2",  # TODO: make this more general
+        split_qa_heads=args.split_qa_heads,
+        # predict_final=args.predict_final,
+    )
+    if args.mask_model != "none":
+        model = DETRsegm(
+            model,
+            mask_head=args.mask_model,
+            freeze_detr=(args.frozen_weights is not None),
+        )
+    # matcher = build_matcher(args)
+
+    return model

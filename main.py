@@ -258,7 +258,7 @@ def get_args_parser():
     parser.add_argument("--contrastive_align_loss_coef", default=1, type=float)
 
     # Run specific
-
+    parser.add_argument("--inference", action="store_true", help="Whether to run inference only")
     parser.add_argument("--test", action="store_true", help="Whether to run evaluation on val or test set")
     parser.add_argument("--test_type", type=str, default="test", choices=("testA", "testB", "test"))
     parser.add_argument("--output-dir", default="", help="path where to save, empty for no saving")
@@ -269,7 +269,7 @@ def get_args_parser():
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument("--eval", action="store_true", help="Only run evaluation")
     parser.add_argument("--num_workers", default=5, type=int)
-    parser.add_argument("--do_qa_with_qa_fine-tuned", action="store_true", help="Have the model been already fine-tuned on other QA dataset?")
+    parser.add_argument("--do_qa_with_qa_fine_tuned", action="store_true", help="Have the model been already fine-tuned on other QA dataset?")
 
     # Distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
@@ -307,7 +307,7 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    torch.set_deterministic(False)
+    torch.set_deterministic(True)
 
     # Build the model
     model, criterion, contrastive_criterion, qa_criterion, weight_dict = build_model(args)
@@ -444,6 +444,11 @@ def main(args):
         print("loading from", args.load)
         checkpoint = torch.load(args.load, map_location="cpu")
         if "model_ema" in checkpoint:
+            if args.do_qa_with_qa_fine_tuned:
+                # Delete mismatching weights:
+                del checkpoint["model_ema"]["qa_embed.weight"]
+                del checkpoint["model_ema"]["answer_type_head.weight"]
+                del checkpoint["model_ema"]["answer_type_head.bias"]
             model_without_ddp.load_state_dict(checkpoint["model_ema"], strict=False)
         else:
             if args.do_qa_with_qa_fine_tuned:

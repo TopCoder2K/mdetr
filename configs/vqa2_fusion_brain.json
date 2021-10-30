@@ -1,0 +1,5 @@
+{
+  "combine_datasets_test": ["vqa2"],
+  "coco_img_path": "/path/to/coco_images_folder",
+  "vqa2_ann_path": "/path/to/processed_annotations_for_inference_folder"
+}

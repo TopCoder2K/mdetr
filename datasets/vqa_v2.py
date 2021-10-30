@@ -28,7 +28,7 @@ class VQAv2QuestionAnswering(torchvision.datasets.CocoDetection):
         self.type2id = {"yes/no": 0, "number": 1, "other": 2}
 
     def __getitem__(self, idx):
-        img, target = super(VQAv2QuestionAnswering, self).__getitem__(idx)
+        img, target = super(VQAv2QuestionAnswering, self).__getitem__(idx)  # target ---
         image_id = self.ids[idx]
         coco_img = self.coco.loadImgs(image_id)[0]
         caption = coco_img["caption"]
@@ -87,6 +87,19 @@ def build(image_set, args):
 
     tokenizer = RobertaTokenizerFast.from_pretrained(args.text_encoder_type)
 
+    if image_set == "fusion_brain":
+        ann_file = Path(args.vqa2_ann_path) / "inference_vqa2_fusion_brain.json"
+
+        return VQAv2QuestionAnswering(
+            img_dir,
+            ann_file,
+            transforms=make_coco_transforms("val", cautious=True),
+            return_masks=args.masks,
+            return_tokens=True,
+            tokenizer=tokenizer,
+            ann_folder=Path(args.vqa2_ann_path),
+        )
+
     if args.do_qa:
         # Для vqa2 это не нужно:
         # assert args.vqa2_split_type is not None
@@ -134,6 +147,5 @@ def build(image_set, args):
                 tokenizer=tokenizer,
                 ann_folder=Path(args.vqa2_ann_path),
             )
-
         else:
             assert False, f"Unknown image set {image_set}"

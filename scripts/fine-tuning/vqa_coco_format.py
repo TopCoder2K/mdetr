@@ -2,16 +2,57 @@
 import argparse
 import json
 import os
-import pickle
-import re
-from collections import defaultdict
 from pathlib import Path
 
 import multimodal
 import numpy as np
 from tqdm import tqdm
+from translate import Translator
 
 seed = 42
+
+
+class VQA2FusionBrain:
+    """
+    Class for the VQA task. Translates questions in Russian into English.
+    """
+
+    def __init__(self, dir_data, questions_file="questions.json"):
+        self.dir_data = dir_data
+        self.translator = Translator(from_lang="ru", to_lang="en")
+
+        with open(dir_data / questions_file) as f:
+            self.questions = json.load(f)
+            # TODO: проверить, почему в индексах разница на 1
+            print(f"Fusion brain vqa2 size = {len(self.questions.keys())}")
+        # for indx, question in self.questions.items():
+        #     if VQA2FusionBrain._simple_detect_lang(question["question"]) == "ru":
+        #         self.questions[indx]["question"] = self.translator.translate(question["question"])
+
+    @staticmethod
+    def _simple_detect_lang(text):
+        if len(set("абвгдежзийклмнопрстуфхцчшщъыьэюяё").intersection(
+                text.lower())) > 0:
+            return "ru"
+        if len(set("abcdefghijklmnopqrstuvwxyz").intersection(
+                text.lower())) > 0:
+            return "en"
+
+    def __iter__(self):
+        self.cur_idx = 0
+        return self
+
+    def __next__(self):
+        self.cur_idx += 1
+        if self.cur_idx >= len(self.questions):
+            raise StopIteration
+        return self.__getitem__(self.cur_idx)
+
+    def __len__(self):
+        return len(self.questions)
+
+    def __getitem__(self, index):
+        return self.questions[str(index)]
 
 
 def parse_args():
@@ -24,17 +65,18 @@ def parse_args():
         type=str,
         help="Path to the vqa dataset",
     )
-    parser.add_argument(
-        "--img_path",
-        default="",
-        required=True,
-        type=str,
-        help="Path to the vqa image dataset",
-    )
+
+    # parser.add_argument(
+    #     "--img_path",
+    #     default="",
+    #     required=True,
+    #     type=str,
+    #     help="Path to the vqa image dataset",
+    # )
 
     parser.add_argument(
         "--out_path",
-        default="",
+        default=None,
         type=str,
         help="Path where to export the resulting dataset.",
     )
@@ -42,10 +84,17 @@ def parse_args():
     parser.add_argument(
         "--coco_path",
         default="",
-        required=True,
+        required=False,
         type=str,
         help="Path to coco dataset.",
     )
+
+    parser.add_argument(
+        "--fusion_brain",
+        action="store_true",
+        help="Whether to run inference for the fusion brain",
+    )
+
     return parser.parse_args()
 
 
@@ -66,6 +115,40 @@ def split_val(dataset):
 
 
 def convert(split, data_path, output_path, coco_path):
+    if split == "fusion_brain":
+        dataset = list(VQA2FusionBrain(dir_data=data_path))
+        categories = [{"supercategory": "object", "id": 1, "name": "object"}]
+        annotations = []
+        images = []
+        d_name = "vqa2"
+
+        for idx, question_data in tqdm(enumerate(dataset)):
+            cur_img = {
+                "file_name": question_data["file_name"],
+                "height": None,  # потенциально есть в таргет, но не используется
+                "width": None,  # потенциально есть в таргет, но не используется
+                "id": idx,  # эквивалентно next_img_id, так как тип датасета один единственный
+                "original_id": None,  # потенциально есть в таргет, но не используется
+                "caption": question_data["question"],
+                "questionId": idx,  # всё равно никак не влияет, так как участвует только в target
+                "answer": None,
+                "scores": None,
+                "answer_type": "other",  # заглушка, чтобы не вылетало KeyError в self.type2id[coco_img["answer_type"]]
+                "tokens_negative": [(0, len(question_data["question"]))],  # в vqa2 не используются, так что никак не влияет
+                "dataset_name": d_name,
+            }
+
+            images.append(cur_img)
+
+        ds = {"info": [], "licenses": [], "images": images,
+              "annotations": annotations, "categories": categories}
+
+        print("Writing to file....")
+        with open(output_path / f"inference_vqa2_fusion_brain.json",
+                  "w") as j_file:
+            json.dump(ds, j_file)
+        print("Done!")
+        return 0, 0
 
     dataset = list(multimodal.datasets.VQA2(dir_data=data_path, min_ans_occ=9, split=split))
 
@@ -160,8 +243,11 @@ def main(args):
     np.random.seed(seed)
     os.makedirs(str(output_path), exist_ok=True)
 
-    for split in ["train", "val", "test-dev", "test"]:
-        convert(split, data_path, output_path, args.coco_path)
+    if args.fusion_brain:
+        convert("fusion_brain", data_path, output_path, args.coco_path)
+    else:
+        for split in ["train", "val", "test-dev", "test"]:
+            convert(split, data_path, output_path, args.coco_path)
 
 
 if __name__ == "__main__":

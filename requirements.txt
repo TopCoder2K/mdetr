@@ -1,4 +1,4 @@
-torch>=1.7.0
+torch>=1.7.0, <1.10.*
 torchvision>=0.6.0
 cython
 scipy
@@ -9,6 +9,9 @@ onnx
 onnxruntime
 prettytable
 submitit
-git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI&egg=pycocotools
-git+https://github.com/cocodataset/panopticapi.git#egg=panopticapi
+pycocotools
+panopticapi
 timm
+translate
+multimodal
+h5py
