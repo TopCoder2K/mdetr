@@ -174,7 +174,7 @@ class MDETR(nn.Module):
             out = {}
             if self.qa_dataset is not None:
                 if self.split_qa_heads:
-                    if self.split_qa == "gqa":
+                    if self.qa_dataset == "gqa":
                         answer_embeds = hs[0, :, -6:]
                         hs = hs[:, :, :-6]
                         out["pred_answer_type"] = self.answer_type_head(answer_embeds[:, 0])
