@@ -29,7 +29,7 @@ def get_args_parser():
 
     # Dataset specific
     parser.add_argument("--dataset_config", default=None, required=True)
-    # parser.add_argument("--do_qa", action="store_true", help="Whether to do question answering")
+    parser.add_argument("--do_qa", action="store_true", help="Whether to do question answering")
     # parser.add_argument(
     #     "--predict_final",
     #     action="store_true",
@@ -267,7 +267,8 @@ def get_args_parser():
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument("--eval", action="store_true", help="Only run evaluation")
     parser.add_argument("--num_workers", default=5, type=int)
-    parser.add_argument("--do_qa_with_qa_fine-tuned", action="store_true", help="Have the model been already fine-tuned on other QA dataset?")
+    parser.add_argument("--do_qa_with_qa_fine_tuned", action="store_true",
+                        help="Have the model been already fine-tuned on other QA dataset?")
 
     # Distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
@@ -314,16 +315,20 @@ def run_inference(
                 id2answer_by_type = {ans_type: {v: k for k, v in ans2id.items()}
                                      for ans_type, ans2id in data_loader.dataset.answer2id_by_type.items()}
                 answer_type = outputs["pred_answer_type"].argmax(-1).cpu().numpy()
-                print(outputs["pred_answer_type"], answer_type)
+                # print(outputs["pred_answer_type"], answer_type)
 
                 for j in range(len(answer_type)):
                     pred_answer_id = outputs["pred_answer_" + id2type[answer_type[j]]][j].argmax(-1).item()
                     pred_answer = id2answer_by_type[id2type[answer_type[j]]][pred_answer_id]
                     fb_answers[str(i * args.batch_size + j)] = pred_answer
-                print("pred_answer_" + id2type[answer_type[0]], outputs["pred_answer_" + id2type[answer_type[0]]].shape)
+                # print("pred_answer_" + id2type[answer_type[0]], outputs["pred_answer_" + id2type[answer_type[0]]].shape)
 
             else:
-                assert False, "Not implemented"
+                id2answer = {idx: answer for answer, idx in data_loader.dataset.answer2id.items()}
+                answers_ids = outputs["pred_answer"].argmax(-1).cpu().numpy()
+
+                for j in range(len(answers_ids)):
+                    fb_answers[str(i * args.batch_size + j)] = id2answer[answers_ids[j]]
 
         else:
             assert False, "Not implemented"
@@ -443,6 +448,11 @@ def main(args):
         print("loading from", args.load)
         checkpoint = torch.load(args.load, map_location="cpu")
         if "model_ema" in checkpoint:
+            if args.do_qa_with_qa_fine_tuned:
+                # Delete mismatching weights:
+                del checkpoint["model_ema"]["qa_embed.weight"]
+                del checkpoint["model_ema"]["answer_type_head.weight"]
+                del checkpoint["model_ema"]["answer_type_head.bias"]
             model_without_ddp.load_state_dict(checkpoint["model_ema"], strict=False)
         else:
             if args.do_qa_with_qa_fine_tuned:
@@ -476,7 +486,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("DETR training and evaluation script", parents=[get_args_parser()])
+    parser = argparse.ArgumentParser("MDETR inference script", parents=[get_args_parser()])
     args = parser.parse_args()
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)

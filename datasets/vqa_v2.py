@@ -28,7 +28,7 @@ class VQAv2QuestionAnswering(torchvision.datasets.CocoDetection):
         self.type2id = {"yes/no": 0, "number": 1, "other": 2}
 
     def __getitem__(self, idx):
-        img, target = super(VQAv2QuestionAnswering, self).__getitem__(idx)  # target ---
+        img, target = super(VQAv2QuestionAnswering, self).__getitem__(idx)
         image_id = self.ids[idx]
         coco_img = self.coco.loadImgs(image_id)[0]
         caption = coco_img["caption"]

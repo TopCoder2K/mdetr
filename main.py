@@ -626,7 +626,7 @@ def main(args):
                 if "gqa" in args.combine_datasets:
                     metric = test_stats["gqa_accuracy_answer_total_unscaled"]
                 else:
-                    metric = test_stats["vqa2_accuracy_answer_total_unscaled"]  # TODO: в какой момент приписывается название датасета?)
+                    metric = test_stats["vqa2_accuracy_answer_total_unscaled"]
             else:
                 metric = np.mean([v[1] for k, v in test_stats.items() if "coco_eval_bbox" in k])
 

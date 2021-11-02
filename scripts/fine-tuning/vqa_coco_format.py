@@ -7,7 +7,7 @@ from pathlib import Path
 import multimodal
 import numpy as np
 from tqdm import tqdm
-from translate import Translator
+# from translate import Translator
 
 seed = 42
 
@@ -19,11 +19,10 @@ class VQA2FusionBrain:
 
     def __init__(self, dir_data, questions_file="questions.json"):
         self.dir_data = dir_data
-        self.translator = Translator(from_lang="ru", to_lang="en")
+        # self.translator = Translator(from_lang="ru", to_lang="en")
 
         with open(dir_data / questions_file) as f:
             self.questions = json.load(f)
-            # TODO: проверить, почему в индексах разница на 1
             print(f"Fusion brain vqa2 size = {len(self.questions.keys())}")
         # for indx, question in self.questions.items():
         #     if VQA2FusionBrain._simple_detect_lang(question["question"]) == "ru":
@@ -44,9 +43,9 @@ class VQA2FusionBrain:
 
     def __next__(self):
         self.cur_idx += 1
-        if self.cur_idx >= len(self.questions):
+        if self.cur_idx > len(self.questions):
             raise StopIteration
-        return self.__getitem__(self.cur_idx)
+        return self.__getitem__(self.cur_idx - 1)  # Нумерация с нуля
 
     def __len__(self):
         return len(self.questions)
@@ -95,6 +94,12 @@ def parse_args():
         help="Whether to run inference for the fusion brain",
     )
 
+    parser.add_argument(
+        "--use_translated",
+        action="store_true",
+        help="Whether to use translated versions of the questions. Works only with --fusion_brain option"
+    )
+
     return parser.parse_args()
 
 
@@ -114,9 +119,17 @@ def split_val(dataset):
     return train_val_dataset, minival_dataset
 
 
-def convert(split, data_path, output_path, coco_path):
+def convert(split, data_path, output_path, coco_path, use_translated=False):
     if split == "fusion_brain":
-        dataset = list(VQA2FusionBrain(dir_data=data_path))
+        dataset = None
+        questions_path = data_path / "translated_questions.json"
+        # Если есть переведённые вопросы, то используем их.
+        if questions_path.is_file() and use_translated:
+            print("Using translated version of the questions")
+            dataset = list(VQA2FusionBrain(dir_data=data_path,
+                                           questions_file="translated_questions.json"))
+        else:
+            dataset = list(VQA2FusionBrain(dir_data=data_path))
         categories = [{"supercategory": "object", "id": 1, "name": "object"}]
         annotations = []
         images = []
@@ -244,7 +257,7 @@ def main(args):
     os.makedirs(str(output_path), exist_ok=True)
 
     if args.fusion_brain:
-        convert("fusion_brain", data_path, output_path, args.coco_path)
+        convert("fusion_brain", data_path, output_path, args.coco_path, args.use_translated)
     else:
         for split in ["train", "val", "test-dev", "test"]:
             convert(split, data_path, output_path, args.coco_path)
