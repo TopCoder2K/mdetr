@@ -15,3 +15,7 @@ timm
 translate
 multimodal
 h5py
+
+datasets
+sacrebleu
+sentencepiece

@@ -7,7 +7,6 @@ from pathlib import Path
 import multimodal
 import numpy as np
 from tqdm import tqdm
-# from translate import Translator
 
 seed = 42
 
@@ -19,23 +18,10 @@ class VQA2FusionBrain:
 
     def __init__(self, dir_data, questions_file="questions.json"):
         self.dir_data = dir_data
-        # self.translator = Translator(from_lang="ru", to_lang="en")
 
         with open(dir_data / questions_file) as f:
             self.questions = json.load(f)
             print(f"Fusion brain vqa2 size = {len(self.questions.keys())}")
-        # for indx, question in self.questions.items():
-        #     if VQA2FusionBrain._simple_detect_lang(question["question"]) == "ru":
-        #         self.questions[indx]["question"] = self.translator.translate(question["question"])
-
-    @staticmethod
-    def _simple_detect_lang(text):
-        if len(set("абвгдежзийклмнопрстуфхцчшщъыьэюяё").intersection(
-                text.lower())) > 0:
-            return "ru"
-        if len(set("abcdefghijklmnopqrstuvwxyz").intersection(
-                text.lower())) > 0:
-            return "en"
 
     def __iter__(self):
         self.cur_idx = 0
@@ -123,7 +109,7 @@ def convert(split, data_path, output_path, coco_path, use_translated=False):
     if split == "fusion_brain":
         dataset = None
         questions_path = data_path / "translated_questions.json"
-        # Если есть переведённые вопросы, то используем их.
+        # Если есть переведённые вопросы, то используем их
         if questions_path.is_file() and use_translated:
             print("Using translated version of the questions")
             dataset = list(VQA2FusionBrain(dir_data=data_path,

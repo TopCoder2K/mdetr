@@ -335,7 +335,7 @@ def run_inference(
 
     if not os.path.exists("./output/"):
         os.makedirs("./output/")
-    with open("./output/prediction_VQA.json", "w") as f:
+    with open("./output/prediction_VQA_untranslated.json", "w") as f:
         json.dump(fb_answers, f)
 
 def main(args):
