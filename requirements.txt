@@ -1,3 +1,4 @@
+numpy
 torch>=1.7.0, <1.10.*
 torchvision>=0.6.0
 cython
@@ -9,8 +10,8 @@ onnx
 onnxruntime
 prettytable
 submitit
-pycocotools
-panopticapi
+git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI&egg=pycocotools
+git+https://github.com/cocodataset/panopticapi.git#egg=panopticapi
 timm
 translate
 multimodal
