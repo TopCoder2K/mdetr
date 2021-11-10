@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.utils
 from torch.utils.data import ConcatDataset, DataLoader, DistributedSampler
+from torch.hub import set_dir
 
 import util.dist as dist
 import util.misc as utils
@@ -339,6 +340,9 @@ def run_inference(
         json.dump(fb_answers, f)
 
 def main(args):
+    # Set up torch cache directory: ./checkpoints
+    set_dir("./")
+
     # Init distributed mode
     dist.init_distributed_mode(args)
 

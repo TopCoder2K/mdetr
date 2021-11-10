@@ -109,8 +109,8 @@ def convert(split, data_path, output_path, coco_path, use_translated=False):
     if split == "fusion_brain":
         dataset = None
         questions_path = data_path / "translated_questions.json"
-        # Если есть переведённые вопросы, то используем их
-        if questions_path.is_file() and use_translated:
+        # If questions have been already translated and were enabled, use them
+        if use_translated and questions_path.is_file():
             print("Using translated version of the questions")
             dataset = list(VQA2FusionBrain(dir_data=data_path,
                                            questions_file="translated_questions.json"))

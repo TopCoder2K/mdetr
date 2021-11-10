@@ -51,8 +51,14 @@ class Transformer(nn.Module):
 
         self._reset_parameters()
 
-        self.tokenizer = RobertaTokenizerFast.from_pretrained(text_encoder_type)
-        self.text_encoder = RobertaModel.from_pretrained(text_encoder_type)
+        self.tokenizer = RobertaTokenizerFast.from_pretrained(
+            text_encoder_type,
+            cache_dir="./checkpoints/"
+        )
+        self.text_encoder = RobertaModel.from_pretrained(
+            text_encoder_type,
+            cache_dir="./checkpoints/"
+        )
 
         if freeze_text_encoder:
             for p in self.text_encoder.parameters():

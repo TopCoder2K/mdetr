@@ -15,9 +15,18 @@ def simple_detect_lang(text):
             text.lower())) > 0:
         return "en"
 
+
 def translate_questions_from_ru_into_en(data_path):
-    ruen_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
-    ruen_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
+    # ruen_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
+    # ruen_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
+    ruen_tokenizer = AutoTokenizer.from_pretrained(
+        "Helsinki-NLP/opus-mt-ru-en",
+        cache_dir="./checkpoints/"
+    )
+    ruen_model = AutoModelForSeq2SeqLM.from_pretrained(
+        "Helsinki-NLP/opus-mt-ru-en",
+        cache_dir="./checkpoints/"
+    )
 
     with open(data_path / "questions.json", "r") as f:
         questions = json.load(f)
@@ -43,31 +52,39 @@ def translate_questions_from_ru_into_en(data_path):
 
 
 def translate_answers_from_en_into_ru(data_path, output_path):
-    enru_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
-    enru_model = \
-        AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
+    # enru_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
+    # enru_model = \
+    #     AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
+    enru_tokenizer = AutoTokenizer.from_pretrained(
+        "Helsinki-NLP/opus-mt-en-ru",
+        cache_dir="./checkpoints/"
+    )
+    enru_model = AutoModelForSeq2SeqLM.from_pretrained(
+        "Helsinki-NLP/opus-mt-en-ru",
+        cache_dir="./checkpoints/"
+    )
 
     with open(data_path / "translated_questions.json", "r") as f:
         translated_questions = json.load(f)
     with open(output_path / "prediction_VQA_untranslated.json", "r") as f:
         untranslated_answers = json.load(f)
 
-    translated_ans = defaultdict(dict)
+    translated_ans = {}
     for i in tqdm(range(len(untranslated_answers))):
-        translated_ans[str(i)]["answer"] = untranslated_answers[str(i)]
-        translated_ans[str(i)]["lang"] = \
-            translated_questions[str(i)]["original_lang"]
-        if translated_ans[str(i)]["lang"] == "ru":
+        translated_ans[str(i)] = untranslated_answers[str(i)]
+
+        if translated_questions[str(i)]["original_lang"] == "ru":
             translated = enru_model.generate(**enru_tokenizer(
-                translated_ans[str(i)]["answer"],
+                translated_ans[str(i)],
                 return_tensors="pt",
                 padding=True
             ))
-            translated_ans[str(i)]["answer"] = \
-                enru_tokenizer.decode(translated.squeeze(),
-                                      skip_special_tokens=True)
+            translated_ans[str(i)] = enru_tokenizer.decode(
+                translated.squeeze(), skip_special_tokens=True
+            )
     with open(output_path / "prediction_VQA.json", "w") as f:
         json.dump(translated_ans, f)
+
 
 def parse_args():
     parser = argparse.ArgumentParser("Translation script")
@@ -83,6 +100,7 @@ def parse_args():
                         help="Path to the output produced by the model")
 
     return parser.parse_args()
+
 
 def main(args):
     if args.questions and args.answers:
