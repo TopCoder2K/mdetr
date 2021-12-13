@@ -11,6 +11,7 @@ from copy import deepcopy
 from functools import partial
 from pathlib import Path
 from tqdm import tqdm
+from collections import defaultdict, Counter
 
 import numpy as np
 import torch
@@ -22,6 +23,7 @@ import util.dist as dist
 import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
 from models import build_model
+from models.postprocessors import build_postprocessors
 
 
 def get_args_parser():
@@ -36,7 +38,7 @@ def get_args_parser():
     #     action="store_true",
     #     help="If true, will predict if a given box is in the actual referred set. Useful for CLEVR-Ref+ only currently.",
     # )
-    # parser.add_argument("--no_detection", action="store_true", help="Whether to train the detector")
+    parser.add_argument("--no_detection", action="store_true", help="Whether to train the detector")
     parser.add_argument(
         "--split_qa_heads", action="store_true", help="Whether to use a separate head per question type in vqa"
     )
@@ -49,6 +51,7 @@ def get_args_parser():
     parser.add_argument(
         "--combine_datasets_test", nargs="+", help="List of datasets to combine for eval", default=["vqa2"]
     )
+    parser.add_argument("--fb_input_dir", help="Path to the Fusion Brain 'input' directory", default="./input")
 
     parser.add_argument("--coco_path", type=str, default="")
     parser.add_argument("--vg_img_path", type=str, default="")
@@ -289,12 +292,13 @@ def run_inference(
     """
 
     model.eval()
-    fb_answers = {}
+    fb_answers = defaultdict(partial(defaultdict, list)) if dset_name == "zsOD" else {}
+    requests_freq = Counter() if dset_name == "zsOD" else None
 
     for i, batch_dict in tqdm(enumerate(data_loader)):
         samples = batch_dict["samples"].to(device)
-        positive_map = batch_dict["positive_map"].to(
-            device) if "positive_map" in batch_dict else None
+        # positive_map = batch_dict["positive_map"].to(
+        #     device) if "positive_map" in batch_dict else None
         targets = batch_dict["targets"]
         # answers = {k: v.to(device) for k, v in batch_dict[
         #     "answers"].items()} if "answers" in batch_dict else None
@@ -307,8 +311,7 @@ def run_inference(
             outputs = model(samples, captions)
         else:
             memory_cache = model(samples, captions, encode_and_save=True)
-            outputs = model(samples, captions, encode_and_save=False,
-                            memory_cache=memory_cache)
+            outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache)
 
         if dset_name == "vqa2":
             if args.split_qa_heads:
@@ -316,13 +319,11 @@ def run_inference(
                 id2answer_by_type = {ans_type: {v: k for k, v in ans2id.items()}
                                      for ans_type, ans2id in data_loader.dataset.answer2id_by_type.items()}
                 answer_type = outputs["pred_answer_type"].argmax(-1).cpu().numpy()
-                # print(outputs["pred_answer_type"], answer_type)
 
                 for j in range(len(answer_type)):
                     pred_answer_id = outputs["pred_answer_" + id2type[answer_type[j]]][j].argmax(-1).item()
                     pred_answer = id2answer_by_type[id2type[answer_type[j]]][pred_answer_id]
                     fb_answers[str(i * args.batch_size + j)] = pred_answer
-                # print("pred_answer_" + id2type[answer_type[0]], outputs["pred_answer_" + id2type[answer_type[0]]].shape)
 
             else:
                 id2answer = {idx: answer for answer, idx in data_loader.dataset.answer2id.items()}
@@ -331,13 +332,55 @@ def run_inference(
                 for j in range(len(answers_ids)):
                     fb_answers[str(i * args.batch_size + j)] = id2answer[answers_ids[j]]
 
+        if dset_name == "zsOD":
+            postprocessors = build_postprocessors(args, dset_name)
+            orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
+            # print(targets[0])
+            # print("----------------------------------------------------------------------------")
+            results = postprocessors["bbox"](outputs, orig_target_sizes)  # список словарей размера batch_size
+            # print(results[0])
+            # print("============================================================================")
+
+            for j_batch_dim in range(len(results)):
+                # bboxes.shape = (100, 4), причём формат координат --- (x0, y0, x1, y1)
+                scores, labels, bboxes = results[j_batch_dim].values()
+
+                filename = targets[j_batch_dim]["file_name"]
+                request = targets[j_batch_dim]["orig_caption"]
+                requests_freq[request] += 1
+                cur_k = requests_freq[request]
+
+                # Выбираем top k детекций в порядке убывания уверенности
+                best_scores, best_obj_ids = scores.topk(k=cur_k, dim=-1)
+                # В данный момент берём k-ый по счёту
+                best_score = best_scores[cur_k - 1]
+                best_obj_id = best_obj_ids[cur_k - 1]
+                best_bbox = bboxes[best_obj_id]
+
+                # Переводим в формат (x0, y0, w, h)
+                best_bbox[2] = best_bbox[2] - best_bbox[0]
+                best_bbox[3] = best_bbox[3] - best_bbox[1]
+
+                # Избавляемся от tensor и np.float32, так как json не умеет с ними работать
+                best_bbox = list(map(float, (best_bbox.cpu().numpy())))
+                best_score = float(best_score.item())
+
+                fb_answers[filename][request].append((best_bbox, best_score))
+
         else:
             assert False, "Not implemented"
 
+    # Всегда выводим в ./output
     if not os.path.exists("./output/"):
         os.makedirs("./output/")
-    with open("./output/prediction_VQA_untranslated.json", "w") as f:
-        json.dump(fb_answers, f)
+
+    if dset_name == "vqa2":
+        with open("./output/prediction_VQA_untranslated.json", "w") as f:
+            json.dump(fb_answers, f)
+    elif dset_name == "zsOD":
+        with open("./output/prediction_zsOD.json", "w") as f:
+            json.dump(fb_answers, f)
+
 
 def main(args):
     # Set up torch cache directory: ./checkpoints

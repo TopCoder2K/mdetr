@@ -17,6 +17,7 @@ from .phrasecut import build as build_phrasecut
 from .refexp import build as build_refexp
 from .vg import build as build_vg
 from .vqa_v2 import build as build_vqa_v2
+from .zsOD_FB import build as build_zsod_fb
 
 
 def get_coco_api_from_dataset(dataset):
@@ -56,4 +57,6 @@ def build_dataset(dataset_file: str, image_set: str, args):
         return build_phrasecut(image_set, args)
     if dataset_file == "vqa2":
         return build_vqa_v2(image_set, args)
+    if dataset_file == "zsOD":
+        return build_zsod_fb(image_set, args)
     raise ValueError(f"dataset {dataset_file} not supported")
