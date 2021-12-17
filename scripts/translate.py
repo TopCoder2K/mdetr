@@ -6,6 +6,8 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 
+from deep_translator import GoogleTranslator
+
 
 def simple_detect_lang(text):
     if len(set("абвгдежзийклмнопрстуфхцчшщъыьэюяё").intersection(
@@ -19,6 +21,8 @@ def simple_detect_lang(text):
 def translate_questions_from_ru_into_en(data_path):
     # ruen_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
     # ruen_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-ru-en")
+    # ruen_translator = GoogleTranslator(source='ru', target='en')
+
     ruen_tokenizer = AutoTokenizer.from_pretrained(
         "Helsinki-NLP/opus-mt-ru-en",
         cache_dir="./checkpoints/"
@@ -51,38 +55,51 @@ def translate_questions_from_ru_into_en(data_path):
         json.dump(translated_ques, f)
 
 
-def translate_answers_from_en_into_ru(data_path, output_path):
+def translate_answers_from_en_into_ru(data_path, output_path, online=False):
     # enru_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
     # enru_model = \
     #     AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-en-ru")
-    enru_tokenizer = AutoTokenizer.from_pretrained(
-        "Helsinki-NLP/opus-mt-en-ru",
-        cache_dir="./checkpoints/"
-    )
-    enru_model = AutoModelForSeq2SeqLM.from_pretrained(
-        "Helsinki-NLP/opus-mt-en-ru",
-        cache_dir="./checkpoints/"
-    )
 
-    with open(data_path / "translated_questions.json", "r") as f:
+    with open(data_path / "VQA/translated_questions.json", "r") as f:
         translated_questions = json.load(f)
-    with open(output_path / "prediction_VQA_untranslated.json", "r") as f:
+    with open(output_path / "VQA/prediction_VQA_untranslated.json", "r") as f:
         untranslated_answers = json.load(f)
-
     translated_ans = {}
-    for i in tqdm(range(len(untranslated_answers))):
-        translated_ans[str(i)] = untranslated_answers[str(i)]
 
-        if translated_questions[str(i)]["original_lang"] == "ru":
-            translated = enru_model.generate(**enru_tokenizer(
-                translated_ans[str(i)],
-                return_tensors="pt",
-                padding=True
-            ))
-            translated_ans[str(i)] = enru_tokenizer.decode(
-                translated.squeeze(), skip_special_tokens=True
-            )
-    with open(output_path / "prediction_VQA.json", "w") as f:
+    if not online:
+        enru_tokenizer = AutoTokenizer.from_pretrained(
+            "Helsinki-NLP/opus-mt-en-ru",
+            cache_dir="./checkpoints/"
+        )
+        enru_model = AutoModelForSeq2SeqLM.from_pretrained(
+            "Helsinki-NLP/opus-mt-en-ru",
+            cache_dir="./checkpoints/"
+        )
+
+        for i in tqdm(range(len(untranslated_answers))):
+            translated_ans[str(i)] = untranslated_answers[str(i)]
+
+            if translated_questions[str(i)]["original_lang"] == "ru":
+                translated = enru_model.generate(**enru_tokenizer(
+                    translated_ans[str(i)],
+                    return_tensors="pt",
+                    padding=True
+                ))
+                translated_ans[str(i)] = enru_tokenizer.decode(
+                    translated.squeeze(), skip_special_tokens=True
+                )
+    else:
+        print("Running online translation on answers...")
+        # print(translated_questions["0"], untranslated_answers["0"])
+        enru_translator = GoogleTranslator(source='en', target='ru')
+
+        for i in tqdm(range(len(untranslated_answers))):
+            translated_ans[str(i)] = untranslated_answers[str(i)]
+
+            if translated_questions[str(i)]["original_lang"] == "ru" and not untranslated_answers[str(i)].isdigit():
+                translated_ans[str(i)] = enru_translator.translate(untranslated_answers[str(i)])
+
+    with open(output_path / "VQA/prediction_VQA.json", "w") as f:
         json.dump(translated_ans, f)
 
 
@@ -93,6 +110,9 @@ def parse_args():
                         help="Whether you want to translate questions")
     parser.add_argument("--answers", action="store_true",
                         help="Whether you want to translate answers")
+
+    parser.add_argument("--online", action="store_true",
+                        help="Whether to use online translation")
 
     parser.add_argument("--data_path", default="", required=True, type=str,
                         help="Path to the vqa dataset")
@@ -110,8 +130,9 @@ def main(args):
         if args.questions:
             translate_questions_from_ru_into_en(Path(args.data_path))
         else:
-            translate_answers_from_en_into_ru(Path(args.data_path),
-                                              Path(args.output_path))
+            translate_answers_from_en_into_ru(
+                Path(args.data_path), Path(args.output_path), args.online
+            )
 
 
 if __name__ == "__main__":

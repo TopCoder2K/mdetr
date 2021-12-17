@@ -177,6 +177,7 @@ def get_args_parser():
         action="store_false",
         help="Disables passing the positional encodings to each attention layers",
     )
+    parser.add_argument("--decoder_fusing", action="store_true", help="Whether to fuse decoders from LVIS and VQA2")
 
     # Segmentation
     parser.add_argument(
@@ -266,8 +267,12 @@ def get_args_parser():
     parser.add_argument("--output-dir", default="", help="path where to save, empty for no saving")
     parser.add_argument("--device", default="cuda", help="device to use for training / testing")
     parser.add_argument("--seed", default=42, type=int)
+
     parser.add_argument("--resume", default="", help="resume from checkpoint")
     parser.add_argument("--load", default="", help="resume from checkpoint")
+    parser.add_argument("--load_dec1", default="", help="location from which decoder for the VQA2 is loaded")
+    parser.add_argument("--load_model2", default="", help="location from which **model** for the zsOD is loaded")
+
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
     parser.add_argument("--eval", action="store_true", help="Only run evaluation")
     parser.add_argument("--num_workers", default=5, type=int)
@@ -308,10 +313,10 @@ def run_inference(
 
         memory_cache = None
         if args.masks:
-            outputs = model(samples, captions)
+            outputs = model(samples, captions, dset_name=dset_name)
         else:
             memory_cache = model(samples, captions, encode_and_save=True)
-            outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache)
+            outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache, dset_name=dset_name)
 
         if dset_name == "vqa2":
             if args.split_qa_heads:
@@ -332,7 +337,7 @@ def run_inference(
                 for j in range(len(answers_ids)):
                     fb_answers[str(i * args.batch_size + j)] = id2answer[answers_ids[j]]
 
-        if dset_name == "zsOD":
+        elif dset_name == "zsOD":
             postprocessors = build_postprocessors(args, dset_name)
             orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
             # print(targets[0])
@@ -368,7 +373,7 @@ def run_inference(
                 fb_answers[filename][request].append((best_bbox, best_score))
 
         else:
-            assert False, "Not implemented"
+            assert False, f"Running on {dset_name} is not implemented!"
 
     # Всегда выводим в ./output
     if not os.path.exists("./output/"):
@@ -489,11 +494,13 @@ def main(args):
     #     if args.ema:
     #         model_ema = deepcopy(model_without_ddp)
 
+    # transformer.decoder.layers.0.self_attn.in_proj_weight', 'transformer.decoder.layers.0.self_attn.in_proj_bias', 'transformer.decoder.layers.0.self_attn.out_proj.weight', 'transformer.decoder.layers.0.self_attn.out_proj.bias', 'transformer.decoder.layers.0.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.0.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.0.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.0.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.0.linear1.weight', 'transformer.decoder.layers.0.linear1.bias', 'transformer.decoder.layers.0.linear2.weight', 'transformer.decoder.layers.0.linear2.bias', 'transformer.decoder.layers.0.norm1.weight', 'transformer.decoder.layers.0.norm1.bias', 'transformer.decoder.layers.0.norm3.weight', 'transformer.decoder.layers.0.norm3.bias', 'transformer.decoder.layers.0.norm4.weight', 'transformer.decoder.layers.0.norm4.bias', 'transformer.decoder.layers.1.self_attn.in_proj_weight', 'transformer.decoder.layers.1.self_attn.in_proj_bias', 'transformer.decoder.layers.1.self_attn.out_proj.weight', 'transformer.decoder.layers.1.self_attn.out_proj.bias', 'transformer.decoder.layers.1.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.1.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.1.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.1.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.1.linear1.weight', 'transformer.decoder.layers.1.linear1.bias', 'transformer.decoder.layers.1.linear2.weight', 'transformer.decoder.layers.1.linear2.bias', 'transformer.decoder.layers.1.norm1.weight', 'transformer.decoder.layers.1.norm1.bias', 'transformer.decoder.layers.1.norm3.weight', 'transformer.decoder.layers.1.norm3.bias', 'transformer.decoder.layers.1.norm4.weight', 'transformer.decoder.layers.1.norm4.bias', 'transformer.decoder.layers.2.self_attn.in_proj_weight', 'transformer.decoder.layers.2.self_attn.in_proj_bias', 'transformer.decoder.layers.2.self_attn.out_proj.weight', 'transformer.decoder.layers.2.self_attn.out_proj.bias', 'transformer.decoder.layers.2.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.2.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.2.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.2.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.2.linear1.weight', 'transformer.decoder.layers.2.linear1.bias', 'transformer.decoder.layers.2.linear2.weight', 'transformer.decoder.layers.2.linear2.bias', 'transformer.decoder.layers.2.norm1.weight', 'transformer.decoder.layers.2.norm1.bias', 'transformer.decoder.layers.2.norm3.weight', 'transformer.decoder.layers.2.norm3.bias', 'transformer.decoder.layers.2.norm4.weight', 'transformer.decoder.layers.2.norm4.bias', 'transformer.decoder.layers.3.self_attn.in_proj_weight', 'transformer.decoder.layers.3.self_attn.in_proj_bias', 'transformer.decoder.layers.3.self_attn.out_proj.weight', 'transformer.decoder.layers.3.self_attn.out_proj.bias', 'transformer.decoder.layers.3.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.3.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.3.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.3.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.3.linear1.weight', 'transformer.decoder.layers.3.linear1.bias', 'transformer.decoder.layers.3.linear2.weight', 'transformer.decoder.layers.3.linear2.bias', 'transformer.decoder.layers.3.norm1.weight', 'transformer.decoder.layers.3.norm1.bias', 'transformer.decoder.layers.3.norm3.weight', 'transformer.decoder.layers.3.norm3.bias', 'transformer.decoder.layers.3.norm4.weight', 'transformer.decoder.layers.3.norm4.bias', 'transformer.decoder.layers.4.self_attn.in_proj_weight', 'transformer.decoder.layers.4.self_attn.in_proj_bias', 'transformer.decoder.layers.4.self_attn.out_proj.weight', 'transformer.decoder.layers.4.self_attn.out_proj.bias', 'transformer.decoder.layers.4.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.4.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.4.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.4.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.4.linear1.weight', 'transformer.decoder.layers.4.linear1.bias', 'transformer.decoder.layers.4.linear2.weight', 'transformer.decoder.layers.4.linear2.bias', 'transformer.decoder.layers.4.norm1.weight', 'transformer.decoder.layers.4.norm1.bias', 'transformer.decoder.layers.4.norm3.weight', 'transformer.decoder.layers.4.norm3.bias', 'transformer.decoder.layers.4.norm4.weight', 'transformer.decoder.layers.4.norm4.bias', 'transformer.decoder.layers.5.self_attn.in_proj_weight', 'transformer.decoder.layers.5.self_attn.in_proj_bias', 'transformer.decoder.layers.5.self_attn.out_proj.weight', 'transformer.decoder.layers.5.self_attn.out_proj.bias', 'transformer.decoder.layers.5.cross_attn_image.in_proj_weight', 'transformer.decoder.layers.5.cross_attn_image.in_proj_bias', 'transformer.decoder.layers.5.cross_attn_image.out_proj.weight', 'transformer.decoder.layers.5.cross_attn_image.out_proj.bias', 'transformer.decoder.layers.5.linear1.weight', 'transformer.decoder.layers.5.linear1.bias', 'transformer.decoder.layers.5.linear2.weight', 'transformer.decoder.layers.5.linear2.bias', 'transformer.decoder.layers.5.norm1.weight', 'transformer.decoder.layers.5.norm1.bias', 'transformer.decoder.layers.5.norm3.weight', 'transformer.decoder.layers.5.norm3.bias', 'transformer.decoder.layers.5.norm4.weight', 'transformer.decoder.layers.5.norm4.bias', 'transformer.decoder.norm.weight', 'transformer.decoder.norm.bias'
     # Used for loading weights from another model and starting a training from scratch. Especially useful if
     # loading into a model with different functionality.
     if args.load:
         print("loading from", args.load)
         checkpoint = torch.load(args.load, map_location="cpu")
+
         if "model_ema" in checkpoint:
             if args.do_qa_with_qa_fine_tuned:
                 # Delete mismatching weights:
@@ -509,6 +516,33 @@ def main(args):
                 del checkpoint["model"]["answer_type_head.bias"]
 
             model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
+
+    if args.load_dec1 and args.load_model2:
+        desired_state_dict = model_without_ddp.state_dict()
+        zsOD_tuned_state_dict = torch.load(args.load_model2, map_location="cpu")
+        vqa2_tuned_state_dict = torch.load(args.load_dec1, map_location="cpu")
+
+        model_type = "model_ema" if "model_ema" in zsOD_tuned_state_dict else "model"
+        zsOD_tuned_state_dict = zsOD_tuned_state_dict[model_type]
+        vqa2_tuned_state_dict = vqa2_tuned_state_dict["model"]  # Тут всегда model, если загружать из BEST_checkpoint
+
+        # Загрузили всё, кроме декодеров
+        print("Loading QA related weights from", args.load_dec1)
+        model_without_ddp.load_state_dict(vqa2_tuned_state_dict, strict=False)
+        # Перезагрузили всё, что не связано с QA и декодерами
+        print("Loading zsOD related weights from", args.load_model2)
+        model_without_ddp.load_state_dict(zsOD_tuned_state_dict, strict=False)
+
+        # Загрузка декодеров
+        print("Loading decoder 1 and decoder2 from both locations above")
+        with torch.no_grad():
+            for name, param in desired_state_dict.items():
+                if "decoder1" in name:
+                    mapped_name = name.replace("decoder1", "decoder")
+                    param.copy_(vqa2_tuned_state_dict[mapped_name])
+                elif "decoder2" in name:
+                    mapped_name = name.replace("decoder2", "decoder")
+                    param.copy_(zsOD_tuned_state_dict[mapped_name])
 
     # Used for resuming training from the checkpoint of a model. Used when training times-out or is pre-empted.
     if args.resume:
