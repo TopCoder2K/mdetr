@@ -133,7 +133,8 @@ def convert(split, data_path, output_path, coco_path, use_translated=False):
                 "answer": None,
                 "scores": None,
                 "answer_type": "other",  # заглушка, чтобы не вылетало KeyError в self.type2id[coco_img["answer_type"]]
-                "tokens_negative": [(0, len(question_data["question"]))],  # в vqa2 не используются, так что никак не влияет
+                "question_type": "global",  # аналогичная заглушка для gqa
+                "tokens_negative": [(0, len(question_data["question"]))],  # в vqa2 не используются, так что не влияет
                 "dataset_name": d_name,
             }
 

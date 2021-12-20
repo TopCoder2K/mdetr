@@ -176,6 +176,8 @@ def get_args_parser():
         action="store_false",
         help="Disables passing the positional encodings to each attention layers",
     )
+    parser.add_argument("--finetune_decoder", action="store_true",
+                        help="If set, loads LVIS checkpoint and finetunes decoder for the VQA task")
 
     # Segmentation
     parser.add_argument(
@@ -478,6 +480,53 @@ def main(args):
                 model_ema = deepcopy(model_without_ddp)
             else:
                 model_ema.load_state_dict(checkpoint["model_ema"])
+
+    # TODO: make this more general, model_ema????????
+    if args.finetune_decoder:
+        desired_state_dict = model_without_ddp.state_dict()
+        zsOD_tuned_state_dict = torch.load("/home/pchelintsev/MDETR/mdetr/lvis100_checkpoint.pth", map_location="cpu")
+        vqa2_tuned_state_dict = torch.load("/home/pchelintsev/MDETR/mdetr/input/VQA/3875/BEST_checkpoint.pth",
+                                           map_location="cpu")
+
+        model_type = "model_ema" if "model_ema" in zsOD_tuned_state_dict else "model"
+        zsOD_tuned_state_dict = zsOD_tuned_state_dict[model_type]
+        vqa2_tuned_state_dict = vqa2_tuned_state_dict["model"]
+
+        # Загрузили всё
+        print("Loading QA related weights from ~/MDETR/mdetr/input/VQA/3875/BEST_checkpoint.pth")
+        model_without_ddp.load_state_dict(vqa2_tuned_state_dict, strict=True)
+        # Перезагрузили всё, что не связано с QA и декодером
+        print("Loading zsOD related weights from ~/MDETR/mdetr/lvis100_checkpoint.pth")
+        model_without_ddp.load_state_dict(zsOD_tuned_state_dict, strict=False)
+        # Загрузка VQA декодера, так как он перезатёрся выше
+        print("Loading decoder from ~/MDETR/mdetr/input/VQA/3875/BEST_checkpoint.pth")
+        with torch.no_grad():
+            for name, param in desired_state_dict.items():
+                if "decoder" in name:
+                    param.copy_(vqa2_tuned_state_dict[name])
+        # Так как тестироваться будет именно ema версия, нужно её тоже проинициализировать
+        if args.ema:
+            model_ema = deepcopy(model_without_ddp)
+
+        # dofinetune = torch.load(
+        #     "/home/pchelintsev/MDETR/mdetr/checkpoint/pchelintsev/experiments/495/checkpoint0023.pth",
+        #     map_location="cpu"
+        # )
+        # model_without_ddp.load_state_dict(dofinetune["model"])
+        # optimizer.load_state_dict(dofinetune["optimizer"])
+        # args.start_epoch = dofinetune["epoch"] + 1
+        # model_ema.load_state_dict(dofinetune["model_ema"])
+
+        print("Freezing not VQA parameters...")
+        # Заморозка LVIS энкодера, text_encoder, backbone, feature_resizer, input_proj,
+        # (bbox_embed, class_embed, contrastive_align оставим на всякий случай)
+        for name, param in model_without_ddp.named_parameters():
+            if "text_encoder" in name or "encoder" in name or "backbone" in name \
+                    or "feature_resizer" in name or "input_proj" in name:
+                param.requires_grad = False
+
+        n_parameters = sum(p.numel() for p in model_without_ddp.parameters() if p.requires_grad)
+        print("Updated number of params:", n_parameters)
 
     def build_evaluator_list(base_ds, dataset_name):
         """Helper function to build the list of evaluators for a given dataset"""

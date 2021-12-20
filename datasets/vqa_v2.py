@@ -47,6 +47,7 @@ class VQAv2QuestionAnswering(torchvision.datasets.CocoDetection):
             answer = coco_img["answer"]
 
         target["answer"] = torch.as_tensor(self.answer2id[answer], dtype=torch.long)
+        # TODO: make vqa-gqa compatible (answer_type -> quesiton_type)
         target["answer_type"] = torch.as_tensor(self.type2id[coco_img["answer_type"]], dtype=torch.long)
 
         # util.misc.collate_fn requires to put 'answer' before every type of answer in target

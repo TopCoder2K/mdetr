@@ -11,7 +11,7 @@ from util.evaluate_vqa2_fb import vqa_evaluate
 def evaluate_vqa_answers(output_path):
     with open(output_path / "VQA/true_VQA.json", "r") as f:
         true_answers = json.load(f)
-    with open(output_path / "VQA/prediction_VQA_notsplitted_online_decoder1.json", "r") as f:
+    with open(output_path / "VQA/prediction_VQA_GQA_save_splitted.json", "r") as f:
         predicted_answers = json.load(f)
 
     print("VQA")
@@ -21,7 +21,7 @@ def evaluate_vqa_answers(output_path):
 
 
 def evaluate_zsOD(output_path):
-    with open(output_path / "zsOD/prediction_zsOD_25epochs_online_notsplitted_with_scores_decoder2.json", "r") as f:
+    with open(output_path / "zsOD/prediction_zsOD.json", "r") as f:
         translated_detections = json.load(f)
 
     # Уберём скоры уверенности детекций
@@ -30,7 +30,7 @@ def evaluate_zsOD(output_path):
         translated_detections_without_scores[filename] = defaultdict(list)
         for detected_obj in img_requests.items():
             for occurience in detected_obj[1]:
-                if occurience[1] >= 0.85:
+                if occurience[1] >= 0.0:
                     translated_detections_without_scores[filename][detected_obj[0]].append(occurience[0])
                 else:
                     translated_detections_without_scores[filename][detected_obj[0]]  # просто создаём пустой список

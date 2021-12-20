@@ -284,6 +284,7 @@ def get_args_parser():
     parser.add_argument("--dist-url", default="env://", help="url used to set up distributed training")
     return parser
 
+
 def run_inference(
     model: torch.nn.Module,
     data_loader,
@@ -299,8 +300,13 @@ def run_inference(
     model.eval()
     fb_answers = defaultdict(partial(defaultdict, list)) if dset_name == "zsOD" else {}
     requests_freq = Counter() if dset_name == "zsOD" else None
+    # time_tracker = 0.
+    # run_cnt = 0
+    print(f"PID: {os.getpid()}")
 
     for i, batch_dict in tqdm(enumerate(data_loader)):
+        # start_time = time.time()
+
         samples = batch_dict["samples"].to(device)
         # positive_map = batch_dict["positive_map"].to(
         #     device) if "positive_map" in batch_dict else None
@@ -313,21 +319,34 @@ def run_inference(
 
         memory_cache = None
         if args.masks:
-            outputs = model(samples, captions, dset_name=dset_name)
+            if args.decoder_fusing:
+                outputs = model(samples, captions, dset_name=dset_name)
+            else:
+                outputs = model(samples, captions)
         else:
             memory_cache = model(samples, captions, encode_and_save=True)
-            outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache, dset_name=dset_name)
+            if args.decoder_fusing:
+                outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache,
+                                dset_name=dset_name)
+            else:
+                outputs = model(samples, captions, encode_and_save=False, memory_cache=memory_cache)
 
-        if dset_name == "vqa2":
+        # TODO: сделать это более общим, а пока это только как загрушка
+        if dset_name == "vqa2" or dset_name == "gqa":
             if args.split_qa_heads:
                 id2type = {v: k for k, v in data_loader.dataset.type2id.items()}
                 id2answer_by_type = {ans_type: {v: k for k, v in ans2id.items()}
                                      for ans_type, ans2id in data_loader.dataset.answer2id_by_type.items()}
                 answer_type = outputs["pred_answer_type"].argmax(-1).cpu().numpy()
+                # print(data_loader.dataset.answer2id_by_type)
+                # print(id2answer_by_type)
 
                 for j in range(len(answer_type)):
                     pred_answer_id = outputs["pred_answer_" + id2type[answer_type[j]]][j].argmax(-1).item()
-                    pred_answer = id2answer_by_type[id2type[answer_type[j]]][pred_answer_id]
+                    if dset_name == "vqa2":
+                        pred_answer = id2answer_by_type[id2type[answer_type[j]]][pred_answer_id]
+                    else:
+                        pred_answer = id2answer_by_type["answer_" + id2type[answer_type[j]]][pred_answer_id]
                     fb_answers[str(i * args.batch_size + j)] = pred_answer
 
             else:
@@ -375,11 +394,21 @@ def run_inference(
         else:
             assert False, f"Running on {dset_name} is not implemented!"
 
+        # finish_time = time.time()
+        # if i % 10 == 0:
+        #     print(f"Elapsed: {finish_time - start_time}")
+        # time_tracker += finish_time - start_time
+        # run_cnt += 1
+        # if run_cnt == 500:
+        #     print(f"Avg. time per run on {dset_name}: {time_tracker / 500}, batch_size = {args.batch_size}")
+        #     return
+
+
     # Всегда выводим в ./output
     if not os.path.exists("./output/"):
         os.makedirs("./output/")
 
-    if dset_name == "vqa2":
+    if dset_name == "vqa2" or dset_name == "gqa":
         with open("./output/prediction_VQA_untranslated.json", "w") as f:
             json.dump(fb_answers, f)
     elif dset_name == "zsOD":
@@ -426,12 +455,49 @@ def main(args):
     model = build_model(args)
     model.to(device)
 
+    # model_ema is not needed as we won't train the model
+    # model_ema = deepcopy(model) if args.ema else None
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("number of params:", n_parameters)
+    print("Total number of params:", n_parameters)
+
+    n_parameters = {"backbone": 0, "img_feats_resizer": 0, "text_encoder": 0, "text_feats_resizer": 0, "encoder": 0,
+                    "decoder": 0, "qa_embeds": 0, "answering": 0, "detect_embeds": 0, "zsOD_specific": 0,
+                    "untrainable": 0, "other": 0}
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            # TODO: почему у backbone первые два уровня заморожены?
+            # print(f"Parameter {name} was freezed!")
+            n_parameters["untrainable"] += p.numel()
+            continue
+        # print(name)
+        if "backbone" in name:
+            n_parameters["backbone"] += p.numel()
+        elif "input_proj" in name:
+            n_parameters["img_feats_resizer"] += p.numel()
+        elif "transformer.text_encoder" in name:
+            n_parameters["text_encoder"] += p.numel()
+        elif "transformer.resizer" in name:
+            n_parameters["text_feats_resizer"] += p.numel()
+        elif "transformer.encoder" in name:
+            n_parameters["encoder"] += p.numel()
+        elif "transformer.decoder" in name:
+            n_parameters["decoder"] += p.numel()
+        elif "answer" in name:
+            n_parameters["answering"] += p.numel()
+        elif "qa_embed" in name:
+            n_parameters["qa_embeds"] += p.numel()
+        elif "bbox_embed" in name or "class_embed" in name:
+            n_parameters["zsOD_specific"] += p.numel()
+        elif "query_embed" in name:
+            n_parameters["detect_embeds"] += p.numel()
+        else:
+            n_parameters["other"] += p.numel()
+    print(n_parameters, "\nTrainable:",
+          sum(cnt if p_name != "untrainable" else 0 for p_name, cnt in n_parameters.items()))
 
     # Set up optimizers
     # param_dicts = [
@@ -517,6 +583,9 @@ def main(args):
 
             model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
 
+        # if args.ema:
+        #     model_ema = deepcopy(model_without_ddp)
+
     if args.load_dec1 and args.load_model2:
         desired_state_dict = model_without_ddp.state_dict()
         zsOD_tuned_state_dict = torch.load(args.load_model2, map_location="cpu")
@@ -534,7 +603,7 @@ def main(args):
         model_without_ddp.load_state_dict(zsOD_tuned_state_dict, strict=False)
 
         # Загрузка декодеров
-        print("Loading decoder 1 and decoder2 from both locations above")
+        print("Loading decoder1 and decoder2 from both locations above")
         with torch.no_grad():
             for name, param in desired_state_dict.items():
                 if "decoder1" in name:
@@ -551,6 +620,12 @@ def main(args):
         else:
             checkpoint = torch.load(args.resume, map_location="cpu")
         model_without_ddp.load_state_dict(checkpoint["model"])
+        # if args.ema:
+        #     if "model_ema" not in checkpoint:
+        #         print("WARNING: ema model not found in checkpoint, resetting to current model")
+        #         model_ema = deepcopy(model_without_ddp)
+        #     else:
+        #         model_ema.load_state_dict(checkpoint["model_ema"])
 
     # Runs testing on the dataset
     for i, item in enumerate(test_tuples):

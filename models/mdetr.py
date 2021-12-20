@@ -935,6 +935,8 @@ def build_for_fb(args):
 
     assert not args.masks or args.mask_model != "none"
 
+    qa_dataset = "gqa" if "gqa" in args.combine_datasets_test else "vqa2"
+
     backbone = build_backbone(args)
     transformer = build_transformer(args)
     model = MDETR(
@@ -942,7 +944,7 @@ def build_for_fb(args):
         transformer,
         num_classes=num_classes,
         num_queries=args.num_queries,
-        qa_dataset="vqa2",  # TODO: make this more general
+        qa_dataset=qa_dataset,
         split_qa_heads=args.split_qa_heads,
         # predict_final=args.predict_final,
     )

@@ -105,6 +105,19 @@ def build(image_set, args):
     tokenizer = RobertaTokenizerFast.from_pretrained(args.text_encoder_type)
 
     if args.do_qa:
+        # Only used for Fusion Brain. Run GQA checkpoint on VQA2 data
+        if image_set == "fusion_brain":
+            ann_file = Path(args.vqa2_ann_path) / "inference_vqa2_fusion_brain.json"
+            return GQAQuestionAnswering(
+                img_folder=Path(args.coco_img_path),
+                ann_file=ann_file,
+                transforms=make_coco_transforms("val", cautious=True),
+                return_masks=args.masks,
+                return_tokens=True,
+                tokenizer=tokenizer,
+                ann_folder=Path(args.vqa2_ann_path),
+            )
+
         assert args.gqa_split_type is not None
 
         if image_set == "train":
