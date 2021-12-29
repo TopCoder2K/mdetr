@@ -24,7 +24,7 @@ from datasets.coco_eval import CocoEvaluator
 from datasets.flickr_eval import FlickrEvaluator
 from datasets.phrasecut_eval import PhrasecutEvaluator
 from datasets.refexp import RefExpEvaluator
-from engine import evaluate, train_one_epoch
+from fusion_brain_engine import evaluate, train_one_epoch
 from models import build_model
 from models.postprocessors import build_postprocessors
 
@@ -50,6 +50,9 @@ def get_args_parser():
     )
     parser.add_argument(
         "--combine_datasets_val", nargs="+", help="List of datasets to combine for eval", default=["flickr"]
+    )
+    parser.add_argument(
+        "--co_training", action="store_true", help="Whether to train the model on both datasets simultaneously"
     )
 
     parser.add_argument("--coco_path", type=str, default="")
@@ -358,7 +361,7 @@ def main(args):
         raise RuntimeError("Please provide at least one training dataset")
 
     dataset_train, sampler_train, data_loader_train = None, None, None
-    if not args.eval:
+    if not args.eval and not args.co_training:
         dataset_train = ConcatDataset(
             [build_dataset(name, image_set="train", args=args) for name in args.combine_datasets]
         )
@@ -366,8 +369,8 @@ def main(args):
         # To handle very big datasets, we chunk it into smaller parts.
         if args.epoch_chunks > 0:
             print(
-                f"Splitting the training set into {args.epoch_chunks} of size approximately"
-                f" {len(dataset_train) // args.epoch_chunks}"
+                f"Splitting the training set into {args.epoch_chunks} of size approximately",
+                f"{len(dataset_train) // args.epoch_chunks}"
             )
             chunks = torch.chunk(torch.arange(len(dataset_train)), args.epoch_chunks)
             datasets = [torch.utils.data.Subset(dataset_train, chunk.tolist()) for chunk in chunks]
@@ -390,7 +393,7 @@ def main(args):
                 )
                 for ds, batch_sampler_train in zip(datasets, batch_samplers_train)
             ]
-        else:  # FIXME: data_loader_train дальше не используется, так как всегда стоит epoch_chunks
+        else:
             if args.distributed:
                 sampler_train = DistributedSampler(dataset_train)
             else:
@@ -402,6 +405,81 @@ def main(args):
                 batch_sampler=batch_sampler_train,
                 collate_fn=partial(utils.collate_fn, False),
                 num_workers=args.num_workers,
+            )
+    elif args.co_training:
+        dataset_vqa_train = build_dataset("vqa2", image_set="train", args=args)
+        dataset_lvis_train = build_dataset("modulated_lvis", image_set="train", args=args)
+
+        if args.epoch_chunks > 0:
+            print(
+                f"Splitting the training set into {args.epoch_chunks} of size approximately"
+                f" {max(len(dataset_vqa_train), len(dataset_lvis_train)) // args.epoch_chunks}"
+            )
+            chunks_vqa = torch.chunk(torch.arange(len(dataset_vqa_train)), args.epoch_chunks)
+            datasets_vqa = [torch.utils.data.Subset(dataset_vqa_train, chunk.tolist()) for chunk in chunks_vqa]
+            chunks_lvis = torch.chunk(torch.arange(len(dataset_lvis_train)), args.epoch_chunks)
+            datasets_lvis = [torch.utils.data.Subset(dataset_lvis_train, chunk.tolist()) for chunk in chunks_lvis]
+
+            if args.distributed:
+                samplers_vqa_train = [DistributedSampler(ds) for ds in datasets_vqa]
+                samplers_lvis_train = [DistributedSampler(ds) for ds in datasets_lvis]
+            else:
+                samplers_vqa_train = [torch.utils.data.RandomSampler(ds) for ds in datasets_vqa]
+                samplers_lvis_train = [torch.utils.data.RandomSampler(ds) for ds in datasets_lvis]
+
+            # print(f"SAMPLERS_VQA_TRIAN: {samplers_vqa_train}")
+
+            batch_samplers_vqa_train = [
+                torch.utils.data.BatchSampler(sampler_train, args.batch_size, drop_last=True)
+                for sampler_train in samplers_vqa_train
+            ]
+            batch_samplers_lvis_train = [
+                torch.utils.data.BatchSampler(sampler_train, args.batch_size, drop_last=True)
+                for sampler_train in samplers_lvis_train
+            ]
+            assert len(batch_samplers_vqa_train) == len(datasets_vqa)
+            assert len(batch_samplers_lvis_train) == len(datasets_lvis)
+
+            data_loaders_vqa_train = [
+                DataLoader(
+                    ds,
+                    batch_sampler=batch_sampler_train,
+                    collate_fn=partial(utils.collate_fn, False),
+                    num_workers=args.num_workers,
+                )
+                for ds, batch_sampler_train in zip(datasets_vqa, batch_samplers_vqa_train)
+            ]
+            data_loaders_lvis_train = [
+                DataLoader(
+                    ds,
+                    batch_sampler=batch_sampler_train,
+                    collate_fn=partial(utils.collate_fn, False),
+                    num_workers=args.num_workers,
+                )
+                for ds, batch_sampler_train in zip(datasets_lvis, batch_samplers_lvis_train)
+            ]
+        else:
+            if args.distributed:
+                sampler_vqa_train = DistributedSampler(dataset_vqa_train)
+                sampler_lvis_train = DistributedSampler(dataset_lvis_train)
+            else:
+                sampler_vqa_train = torch.utils.data.RandomSampler(dataset_vqa_train)
+                sampler_lvis_train = torch.utils.data.RandomSampler(dataset_lvis_train)
+
+            batch_sampler_vqa_train = torch.utils.data.BatchSampler(sampler_vqa_train, args.batch_size, drop_last=True)
+            batch_sampler_lvis_train = torch.utils.data.BatchSampler(sampler_lvis_train, args.batch_size,
+                                                                     drop_last=True)
+            data_loaders_vqa_train = DataLoader(
+                dataset_vqa_train,
+                batch_sampler=batch_sampler_vqa_train,
+                collate_fn=partial(utils.collate_fn, False),
+                num_workers=args.num_workers,
+            )
+            data_loaders_lvis_train = DataLoader(
+                dataset_lvis_train,
+                batch_sampler=batch_sampler_lvis_train,
+                collate_fn=partial(utils.collate_fn, False),
+                num_workers=args.num_workers
             )
 
     # Val dataset
@@ -562,7 +640,7 @@ def main(args):
         return evaluator_list
 
     # Runs only evaluation, by default on the validation set unless --test is passed.
-    if args.eval:
+    if args.eval and not args.co_training:  # TODO: eval mode для co_training
         test_stats = {}
         test_model = model_ema if model_ema is not None else model
         for i, item in enumerate(val_tuples):
@@ -597,19 +675,25 @@ def main(args):
     best_metric = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.epoch_chunks > 0:
-            sampler_train = samplers_train[epoch % len(samplers_train)]
-            data_loader_train = data_loaders_train[epoch % len(data_loaders_train)]
-            print(f"Starting epoch {epoch // len(data_loaders_train)}, sub_epoch {epoch % len(data_loaders_train)}")
+            assert len(samplers_vqa_train) == len(samplers_lvis_train), "Number of chunks must be equal!"
+            sampler_vqa_train = samplers_vqa_train[epoch % len(samplers_vqa_train)]
+            data_loader_vqa_train = data_loaders_vqa_train[epoch % len(data_loaders_vqa_train)]
+            sampler_lvis_train = samplers_lvis_train[epoch % len(samplers_lvis_train)]
+            data_loader_lvis_train = data_loaders_lvis_train[epoch % len(data_loaders_lvis_train)]
+            print(f"Starting epoch {epoch // len(data_loaders_vqa_train)}, sub_epoch {epoch % len(data_loaders_vqa_train)}")
         else:
             print(f"Starting epoch {epoch}")
         if args.distributed:
-            sampler_train.set_epoch(epoch)
+            sampler_vqa_train.set_epoch(epoch)
+            sampler_lvis_train.set_epoch(epoch)
+
         train_stats = train_one_epoch(
             model=model,
             criterion=criterion,
             contrastive_criterion=contrastive_criterion,
             qa_criterion=qa_criterion,
-            data_loader=data_loader_train,
+            data_loader_vqa=data_loader_vqa_train,
+            data_loader_zsOD=data_loader_lvis_train,
             weight_dict=weight_dict,
             optimizer=optimizer,
             device=device,
@@ -618,6 +702,7 @@ def main(args):
             max_norm=args.clip_max_norm,
             model_ema=model_ema,
         )
+
         if args.output_dir:
             checkpoint_paths = [output_dir / "checkpoint.pth"]
             # extra checkpoint before LR drop and every 2 epochs
@@ -638,11 +723,15 @@ def main(args):
         if epoch % args.eval_skip == 0:
             test_stats = {}
             test_model = model_ema if model_ema is not None else model
-            for i, item in enumerate(val_tuples):
-                evaluator_list = build_evaluator_list(item.base_ds, item.dataset_name)
-                item = item._replace(evaluator_list=evaluator_list)
-                postprocessors = build_postprocessors(args, item.dataset_name)
-                print(f"Evaluating {item.dataset_name}")
+
+            if args.co_training:
+                vqa_val_dataset = val_tuples[0]
+                lvis_val_dataset = val_tuples[1]
+                # Список оценщиков и построцессоров нужен только для lvis
+                evaluator_list = build_evaluator_list(lvis_val_dataset, "modulated_lvis")
+                postprocessors = build_postprocessors(args, "modulated_lvis")
+
+                print("Evaluating vqa2 and modulated_lvis simultaneously")
                 curr_test_stats = evaluate(
                     model=test_model,
                     criterion=criterion,
@@ -650,12 +739,31 @@ def main(args):
                     qa_criterion=qa_criterion,
                     postprocessors=postprocessors,
                     weight_dict=weight_dict,
-                    data_loader=item.dataloader,
-                    evaluator_list=item.evaluator_list,
+                    data_loader_vqa=data_loader_vqa_train,
+                    data_loader_zsOD=data_loader_lvis_train,
+                    evaluator_list=evaluator_list,
                     device=device,
-                    args=args,
+                    args=args
                 )
-                test_stats.update({item.dataset_name + "_" + k: v for k, v in curr_test_stats.items()})
+            else:
+                for i, item in enumerate(val_tuples):
+                    evaluator_list = build_evaluator_list(item.base_ds, item.dataset_name)
+                    item = item._replace(evaluator_list=evaluator_list)
+                    postprocessors = build_postprocessors(args, item.dataset_name)
+                    print(f"Evaluating {item.dataset_name}")
+                    curr_test_stats = evaluate(
+                        model=test_model,
+                        criterion=criterion,
+                        contrastive_criterion=contrastive_criterion,
+                        qa_criterion=qa_criterion,
+                        postprocessors=postprocessors,
+                        weight_dict=weight_dict,
+                        data_loader=item.dataloader,
+                        evaluator_list=item.evaluator_list,
+                        device=device,
+                        args=args,
+                    )
+                    test_stats.update({item.dataset_name + "_" + k: v for k, v in curr_test_stats.items()})
         else:
             test_stats = {}
 

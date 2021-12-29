@@ -1,0 +1,9 @@
+{
+  "combine_datasets": ["vqa2", "modulated_lvis"],
+  "combine_datasets_val": ["vqa2", "modulated_lvis"],
+  "coco_img_path": "COCO_dataset/images/",
+  "vqa2_ann_path": "VQA_v2_dataset/",
+  "coco2017_path": "COCO_dataset/images/",
+  "modulated_lvis_ann_path": "mdetr_annotations/",
+  "lvis_subset": 10
+}
