@@ -382,6 +382,11 @@ class QACriterionVQA(nn.Module):
     def __init__(self, split_qa_heads):
         super().__init__()
         self.split_qa_heads = split_qa_heads
+        # self.print_hist = print_hist
+        # if self.print_hist:
+        #     self.correct = [0, 0, 0]  # {"yes/no": 0, "number": 0, "other": 0}
+        #     self.incorrect = [0, 0, 0]  # {"yes/no": 0, "number": 0, "other": 0}
+        #     self.id2type = ["yes/no", "number", "other"]
 
     def forward(self, output, answers):
         loss = {}
@@ -389,6 +394,15 @@ class QACriterionVQA(nn.Module):
             loss["loss_answer_total"] = F.cross_entropy(output["pred_answer"], answers["answer"], reduction="mean")
             attr_total = (output["pred_answer"].argmax(-1)) == answers["answer"]
             loss["accuracy_answer_total"] = attr_total.float().mean()
+            #
+            # if self.print_hist:
+            #     pred_ans = output["pred_answer"].argmax(-1)
+            #     for i in range(len(answers["answer"])):
+            #         if answers["answer"][i] == pred_ans[i]:
+            #             self.correct[answers["answer_type"][i]] += 1
+            #         else:
+            #             self.incorrect[answers["answer_type"][i]] += 1
+
             return loss
 
         device = output["pred_answer_type"].device
@@ -445,6 +459,16 @@ class QACriterionVQA(nn.Module):
             type_acc
             * (is_yesno * yesno_acc + is_number * number_acc + is_other * other_acc)
         ).sum() / type_acc.numel()
+
+        # if self.print_hist:
+        #     answer_type = answers["answer_type"]
+        #     pred_ans_type = output["pred_answer_type"].argmax(-1)
+        #     for i in range(len(answers)):
+        #         if answers["answer_" + self.id2type[answer_type[i]]][i] \
+        #                 == output["pred_answer_" + self.id2type[pred_ans_type[i]]]:
+        #             self.correct[answer_type[i]] += 1
+        #         else:
+        #             self.incorrect[answer_type[i]] += 1
 
         return loss
 

@@ -469,13 +469,13 @@ def main(args):
             batch_sampler_vqa_train = torch.utils.data.BatchSampler(sampler_vqa_train, args.batch_size, drop_last=True)
             batch_sampler_lvis_train = torch.utils.data.BatchSampler(sampler_lvis_train, args.batch_size,
                                                                      drop_last=True)
-            data_loaders_vqa_train = DataLoader(
+            data_loader_vqa_train = DataLoader(
                 dataset_vqa_train,
                 batch_sampler=batch_sampler_vqa_train,
                 collate_fn=partial(utils.collate_fn, False),
                 num_workers=args.num_workers,
             )
-            data_loaders_lvis_train = DataLoader(
+            data_loader_lvis_train = DataLoader(
                 dataset_lvis_train,
                 batch_sampler=batch_sampler_lvis_train,
                 collate_fn=partial(utils.collate_fn, False),
@@ -728,11 +728,11 @@ def main(args):
                 vqa_val_dataset = val_tuples[0]
                 lvis_val_dataset = val_tuples[1]
                 # Список оценщиков и построцессоров нужен только для lvis
-                evaluator_list = build_evaluator_list(lvis_val_dataset, "modulated_lvis")
-                postprocessors = build_postprocessors(args, "modulated_lvis")
+                evaluator_list = build_evaluator_list(lvis_val_dataset.base_ds, lvis_val_dataset.dataset_name)
+                postprocessors = build_postprocessors(args, lvis_val_dataset.dataset_name)
 
                 print("Evaluating vqa2 and modulated_lvis simultaneously")
-                curr_test_stats = evaluate(
+                test_stats = evaluate(
                     model=test_model,
                     criterion=criterion,
                     contrastive_criterion=contrastive_criterion,
@@ -779,11 +779,17 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
 
         if epoch % args.eval_skip == 0:
-            if args.do_qa:
+            if args.do_qa:  # TODO: make this more general: dataset name before key is needed if not co_training
                 if "gqa" in args.combine_datasets:
-                    metric = test_stats["gqa_accuracy_answer_total_unscaled"]
+                    if args.co_training:
+                        metric = test_stats["accuracy_answer_total_unscaled"]
+                    else:
+                        metric = test_stats["gqa_accuracy_answer_total_unscaled"]
                 else:
-                    metric = test_stats["vqa2_accuracy_answer_total_unscaled"]
+                    if args.co_training:
+                        metric = test_stats["accuracy_answer_total_unscaled"]
+                    else:
+                        metric = test_stats["vqa2_accuracy_answer_total_unscaled"]
             else:
                 metric = np.mean([v[1] for k, v in test_stats.items() if "coco_eval_bbox" in k])
 

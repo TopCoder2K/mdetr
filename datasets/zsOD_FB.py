@@ -248,7 +248,7 @@ class ZSObjectDetection(ZSObjectDetectionBase):
     def __getitem__(self, idx):
         img, target = super(ZSObjectDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
-        # Специально вместо image_id кладём filename, чтобы потом его достать в fusion_brain.py
+        # Специально вместо image_id кладём filename, чтобы потом его достать в fusion_brain_inference_only.py
         # И ещё кладём запрос, который лежит в caption
         target = {"image_id": image_id, "annotations": target,
                   "caption": self.zsod.imgs[image_id]["caption"]}

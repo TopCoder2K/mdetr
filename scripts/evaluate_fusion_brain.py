@@ -11,7 +11,7 @@ from util.evaluate_vqa2_fb import vqa_evaluate
 def evaluate_vqa_answers(output_path):
     with open(output_path / "VQA/true_VQA.json", "r") as f:
         true_answers = json.load(f)
-    with open(output_path / "VQA/prediction_VQA_GQA_save_splitted.json", "r") as f:
+    with open(output_path / "VQA/prediction_VQA.json", "r") as f:
         predicted_answers = json.load(f)
 
     print("VQA")

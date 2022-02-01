@@ -390,7 +390,7 @@ def main(args):
                 )
                 for ds, batch_sampler_train in zip(datasets, batch_samplers_train)
             ]
-        else:  # FIXME: data_loader_train дальше не используется, так как всегда стоит epoch_chunks
+        else:
             if args.distributed:
                 sampler_train = DistributedSampler(dataset_train)
             else:
@@ -589,6 +589,9 @@ def main(args):
             "n_parameters": n_parameters,
         }
         print(log_stats)
+        # # For the answer histogram:
+        # if args.eval and qa_criterion is not None:
+        #     print(qa_criterion.correct, qa_criterion.incorrect)
         return
 
     # Runs training and evaluates after every --eval_skip epochs

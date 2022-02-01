@@ -13,8 +13,10 @@ from transformers import RobertaTokenizerFast
 
 from .coco import ConvertCocoPolysToMask, ModulatedDetection, make_coco_transforms
 
+
 class VQAv2Detection(ModulatedDetection):
     pass
+
 
 class VQAv2QuestionAnswering(torchvision.datasets.CocoDetection):
     def __init__(self, img_folder, ann_file, transforms, return_masks, return_tokens, tokenizer, ann_folder):

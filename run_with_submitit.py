@@ -16,7 +16,7 @@ os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 # import MLM_detection as mlm_detection
 import submitit
 
-import main as detection
+import fusion_brain_main as detection
 
 
 def parse_args():
@@ -34,8 +34,8 @@ def parse_args():
 
 def get_shared_folder(args) -> Path:
     user = os.getenv("USER")
-    if Path("/checkpoint/").is_dir():
-        p = Path(f"/checkpoint/{user}/experiments")
+    if Path("/MDETR/checkpoints/").is_dir():
+        p = Path(f"/MDETR/checkpoints/{user}/experiments")
         p.mkdir(exist_ok=True)
         return p
     raise RuntimeError("No shared folder available")
@@ -92,7 +92,7 @@ class Trainer(object):
         os.environ["GLOO_SOCKET_IFNAME"] = socket_name
         os.environ["MDETR_CPU_REDUCE"] = "1"
 
-        import main as detection
+        import fusion_brain_main as detection
 
         self._setup_gpu_args()
         detection.main(self.args)
